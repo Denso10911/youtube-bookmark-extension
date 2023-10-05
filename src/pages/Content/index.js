@@ -1,6 +1,77 @@
-import { printLine } from './modules/print';
+;(() => {
+  let youtubeLeftControls, youtubePlayer
+  let currentVideo = ""
+  let currentVideoBookmarks = []
 
-console.log('Content script works!');
-console.log('Must reload extension for modifications to take effect.');
+  const fetchBookmarks = () => {
+    return new Promise(resolve => {
+      chrome.storage.sync.get([currentVideo], obj => {
+        resolve(obj[currentVideo] ? JSON.parse(obj[currentVideo]) : [])
+      })
+    })
+  }
 
-printLine("Using the 'printLine' function from the Print Module");
+  const addNewBookmarkEventHandler = async () => {
+    const currentTime = youtubePlayer.currentTime
+    const newBookmark = {
+      time: currentTime,
+      desc: "Bookmark at " + getTime(currentTime),
+    }
+
+    currentVideoBookmarks = await fetchBookmarks()
+
+    const isAlreadyHadBookmark = currentVideoBookmarks.some(el => el.time === currentTime)
+
+    if (!isAlreadyHadBookmark) {
+      chrome.storage.sync.set({
+        [currentVideo]: JSON.stringify(
+          [...currentVideoBookmarks, newBookmark].sort((a, b) => a.time - b.time)
+        ),
+      })
+    }
+  }
+
+  const newVideoLoaded = async () => {
+    const bookmarkBtnExists = document.getElementsByClassName("bookmark-btn")[0]
+
+    currentVideoBookmarks = await fetchBookmarks()
+
+    if (!bookmarkBtnExists) {
+      const bookmarkBtn = document.createElement("button")
+
+      bookmarkBtn.className = "ytp-button " + "bookmark-btn"
+      bookmarkBtn.title = "Click to bookmark current timestamp"
+      bookmarkBtn.innerHTML = "+"
+      bookmarkBtn.style.fontSize = "24px"
+      bookmarkBtn.style.display = "flex"
+      bookmarkBtn.style.justifyContent = "center"
+
+      youtubeLeftControls = document.getElementsByClassName("ytp-left-controls")[0]
+      youtubePlayer = document.getElementsByClassName("video-stream")[0]
+
+      youtubeLeftControls.appendChild(bookmarkBtn)
+      bookmarkBtn.addEventListener("click", addNewBookmarkEventHandler)
+    }
+  }
+
+  chrome.runtime.onMessage.addListener((obj, sender, response) => {
+    const { type, value, videoId } = obj
+
+    if (type === "NEW") {
+      currentVideo = videoId
+      newVideoLoaded()
+    } else if (type === "PLAY") {
+      youtubePlayer.currentTime = value
+    } else if (type === "DELETE") {
+      currentVideoBookmarks = currentVideoBookmarks.filter(b => b.time !== value)
+      chrome.storage.sync.set({ [currentVideo]: JSON.stringify(currentVideoBookmarks) })
+    }
+  })
+})()
+
+const getTime = t => {
+  const date = new Date(0)
+  date.setSeconds(t)
+
+  return date.toISOString().substr(11, 8)
+}
